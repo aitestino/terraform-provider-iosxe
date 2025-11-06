@@ -623,6 +623,51 @@ func getTemplateSection(content, name string) string {
 	return result
 }
 
+// processCustomInjections looks for INJECT_CUSTOM markers and replaces them with custom template content
+func processCustomInjections(templateContent string, config interface{}) string {
+	// Look for injection markers in the format: {{/* INJECT_CUSTOM: filename */}}
+	injectionRegex := regexp.MustCompile(`\{\{/\*\s*INJECT_CUSTOM:\s*(\w+)\s*\*/\}\}`)
+	
+	return injectionRegex.ReplaceAllStringFunc(templateContent, func(match string) string {
+		// Extract the custom template name
+		matches := injectionRegex.FindStringSubmatch(match)
+		if len(matches) < 2 {
+			return match // Return unchanged if no match
+		}
+		
+		customTemplateName := matches[1]
+		customTemplatePath := "./gen/custom/" + customTemplateName + ".go.tmpl"
+		
+		// Check if custom template exists
+		if _, err := os.Stat(customTemplatePath); os.IsNotExist(err) {
+			// No custom template, return the original default line
+			return "" // The injection marker will be removed, default code remains
+		}
+		
+		// Load and process the custom template
+		customFile, err := os.ReadFile(customTemplatePath)
+		if err != nil {
+			log.Printf("Warning: Could not read custom template %s: %v", customTemplatePath, err)
+			return ""
+		}
+		
+		// Parse and execute the custom template
+		customTemplate, err := template.New(customTemplateName).Funcs(functions).Parse(string(customFile))
+		if err != nil {
+			log.Printf("Warning: Could not parse custom template %s: %v", customTemplatePath, err)
+			return ""
+		}
+		
+		var customOutput bytes.Buffer
+		if err := customTemplate.Execute(&customOutput, config); err != nil {
+			log.Printf("Warning: Could not execute custom template %s: %v", customTemplatePath, err)
+			return ""
+		}
+		
+		return customOutput.String()
+	})
+}
+
 func renderTemplate(templatePath, outputPath string, config interface{}) {
 	file, err := os.Open(templatePath)
 	if err != nil {
@@ -639,6 +684,9 @@ func renderTemplate(templatePath, outputPath string, config interface{}) {
 	for scanner.Scan() {
 		temp = temp + scanner.Text() + "\n"
 	}
+	
+	// Process custom injections before parsing the main template
+	temp = processCustomInjections(temp, config)
 
 	template, err := template.New(path.Base(templatePath)).Funcs(functions).Parse(temp)
 	if err != nil {
