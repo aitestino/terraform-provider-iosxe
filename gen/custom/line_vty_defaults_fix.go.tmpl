@@ -1,0 +1,29 @@
+{{- /* 
+Custom handler for IOS-XE VTY line default behavior
+Problem: IOS-XE enforces VTY lines 0-31 and won't allow deletion of lines 16-31
+Solution: Accept device-enforced extension when device returns larger range than configured
+*/ -}}
+{{- if and (eq $.Name "Line") (eq .TfName "last") }}
+	// Custom handling for IOS-XE VTY line extension behavior
+	// Device enforces minimum VTY lines (0-31) and extends configured ranges
+	deviceValue := value.Int()
+	plannedValue := data.{{toGoName .TfName}}.ValueInt64()
+	
+	// Check if this is the VTY 5-15 that gets extended to 5-31
+	if i > 0 && data.Vty[i].First.ValueInt64() == 5 {
+		// Accept device extension for VTY lines starting at 5
+		if deviceValue > plannedValue && deviceValue == 31 {
+			tflog.Debug(ctx, fmt.Sprintf("VTY line extension: accepting device-enforced range %d-%d (configured %d-%d)", 
+				data.Vty[i].First.ValueInt64(), deviceValue, data.Vty[i].First.ValueInt64(), plannedValue))
+			data.{{toGoName .TfName}} = types.Int64Value(deviceValue)
+		} else {
+			data.{{toGoName .TfName}} = types.Int64Value(value.Int())
+		}
+	} else {
+		// Normal behavior for other VTY ranges
+		data.{{toGoName .TfName}} = types.Int64Value(value.Int())
+	}
+{{- else }}
+	// Default behavior for non-VTY line attributes
+	data.{{toGoName .TfName}} = types.Int64Value(value.Int())
+{{- end }}
